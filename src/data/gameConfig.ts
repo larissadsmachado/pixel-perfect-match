@@ -56,4 +56,4 @@ export function createCookies(): GameCookieItem[] {
   }));
 }
 
-export const START_POSITION = { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
+export const START_POSITION = { x: BOARD_WIDTH / 2, y: 285 };
