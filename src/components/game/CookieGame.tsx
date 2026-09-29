@@ -9,10 +9,11 @@ import {
   PLAYER_SPEED,
   getMazeMap,
 } from "@/data/gameConfig";
-import type { Direction, GameCookieItem, MazeMap, Obstacle } from "@/types/game";
+import type { ChaserEnemy, Direction, GameCookieItem, MazeMap, Obstacle } from "@/types/game";
 import { useGameControls } from "@/hooks/useGameControls";
 import { GameCookie } from "./GameCookie";
 import { GamePlayer } from "./GamePlayer";
+import { GameChaser } from "./GameChaser";
 import { GameHUD } from "./GameHUD";
 import { GameControls } from "./GameControls";
 import { GameEndScreen } from "./GameEndScreen";
@@ -31,10 +32,11 @@ interface Crumb {
 
 const HALF = PLAYER_SIZE / 2;
 const HIT_DISTANCE = (PLAYER_SIZE + COOKIE_SIZE) / 2.2;
+const CELL_SIZE = 32;
 
-/** Wall collision check with bounding box collision */
+/** Precise bounding box wall collision check */
 function isCollidingWithWalls(x: number, y: number, obstacles: Obstacle[]): boolean {
-  const margin = 1;
+  const margin = 2;
   const left = x - HALF + margin;
   const right = x + HALF - margin;
   const top = y - HALF + margin;
@@ -53,6 +55,28 @@ function isCollidingWithWalls(x: number, y: number, obstacles: Obstacle[]): bool
   return false;
 }
 
+/** Get valid corridor directions for a position */
+function getValidDirections(x: number, y: number, obstacles: Obstacle[]): Direction[] {
+  const directions: Direction[] = ["up", "down", "left", "right"];
+  const step = 6;
+  const valid: Direction[] = [];
+
+  for (const dir of directions) {
+    let nx = x;
+    let ny = y;
+    if (dir === "left") nx -= step;
+    if (dir === "right") nx += step;
+    if (dir === "up") ny -= step;
+    if (dir === "down") ny += step;
+
+    if (!isCollidingWithWalls(nx, ny, obstacles)) {
+      valid.push(dir);
+    }
+  }
+
+  return valid;
+}
+
 export function CookieGame() {
   const { pressed, active, press, release } = useGameControls();
 
@@ -64,10 +88,16 @@ export function CookieGame() {
 
   // Map state
   const [mapId, setMapId] = useState<string>(MAZE_MAPS[0].id);
-  const currentMap: MazeMap = getMazeMap(mapId);
+  const currentMap = getMazeMap(mapId);
+
+  // Game state
+  const [lives, setLives] = useState(3);
+  const [invulnerable, setInvulnerable] = useState(false);
+  const invulnerableRef = useRef(false);
 
   // Position & Game refs
   const position = useRef({ ...currentMap.playerStart });
+  const chasersRef = useRef<ChaserEnemy[]>([...currentMap.initialChasers]);
   const cookiesRef = useRef<GameCookieItem[]>([...currentMap.cookies]);
   const eatTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const crumbId = useRef(0);
@@ -75,6 +105,7 @@ export function CookieGame() {
 
   // Game UI state
   const [player, setPlayer] = useState({ ...currentMap.playerStart });
+  const [chasers, setChasers] = useState<ChaserEnemy[]>([...currentMap.initialChasers]);
   const [direction, setDirection] = useState<Direction>("right");
   const [moving, setMoving] = useState(false);
   const [eating, setEating] = useState(false);
@@ -82,6 +113,7 @@ export function CookieGame() {
   const [score, setScore] = useState(0);
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [finished, setFinished] = useState(false);
+  const [victory, setVictory] = useState(true);
 
   const triggerEat = useCallback(() => {
     setEating(true);
@@ -95,14 +127,20 @@ export function CookieGame() {
 
     position.current = { ...selectedMap.playerStart };
     cookiesRef.current = [...selectedMap.cookies];
+    chasersRef.current = [...selectedMap.initialChasers];
     totalCookies.current = selectedMap.cookies.length;
 
     setPlayer({ ...selectedMap.playerStart });
+    setChasers([...selectedMap.initialChasers]);
     setCookies([...selectedMap.cookies]);
     setScore(0);
     setCrumbs([]);
     setEating(false);
     setFinished(false);
+    setVictory(true);
+    setLives(3);
+    setInvulnerable(false);
+    invulnerableRef.current = false;
     setDirection("right");
     setMoving(false);
   }, [mapId]);
@@ -141,27 +179,155 @@ export function CookieGame() {
         const curr = position.current;
         const obstacles = currentMap.obstacles;
 
-        // X axis collision check
-        let nextX = Math.min(BOARD_WIDTH - HALF, Math.max(HALF, curr.x + dx));
-        if (isCollidingWithWalls(nextX, curr.y, obstacles)) {
-          nextX = curr.x;
+        // Smooth Corner Alignment / Axis Nudging
+        let tryX = curr.x;
+        let tryY = curr.y;
+
+        if (dy !== 0 && dx === 0) {
+          // Moving vertically: align X to closest grid cell center for smooth turn
+          const colCenter = Math.floor(curr.x / CELL_SIZE) * CELL_SIZE + CELL_SIZE / 2;
+          const diffX = colCenter - curr.x;
+          if (Math.abs(diffX) < 14) {
+            tryX += Math.sign(diffX) * Math.min(PLAYER_SPEED, Math.abs(diffX));
+          }
+          tryY += dy;
+        } else if (dx !== 0 && dy === 0) {
+          // Moving horizontally: align Y to closest grid cell center for smooth turn
+          const rowCenter = Math.floor(curr.y / CELL_SIZE) * CELL_SIZE + CELL_SIZE / 2;
+          const diffY = rowCenter - curr.y;
+          if (Math.abs(diffY) < 14) {
+            tryY += Math.sign(diffY) * Math.min(PLAYER_SPEED, Math.abs(diffY));
+          }
+          tryX += dx;
+        } else {
+          tryX += dx;
+          tryY += dy;
         }
 
-        // Y axis collision check
-        let nextY = Math.min(BOARD_HEIGHT - HALF, Math.max(HALF, curr.y + dy));
-        if (isCollidingWithWalls(nextX, nextY, obstacles)) {
-          nextY = curr.y;
+        // Bound checks & collision checks
+        const clampedX = Math.min(BOARD_WIDTH - HALF, Math.max(HALF, tryX));
+        const clampedY = Math.min(BOARD_HEIGHT - HALF, Math.max(HALF, tryY));
+
+        let finalX = curr.x;
+        let finalY = curr.y;
+
+        if (!isCollidingWithWalls(clampedX, curr.y, obstacles)) {
+          finalX = clampedX;
+        }
+        if (!isCollidingWithWalls(finalX, clampedY, obstacles)) {
+          finalY = clampedY;
         }
 
-        const next = { x: nextX, y: nextY };
+        const next = { x: finalX, y: finalY };
         position.current = next;
         setPlayer(next);
       }
 
+      // Update Chasers AI Movement
+      const currPlayerPos = position.current;
+      const obstacles = currentMap.obstacles;
+
+      const updatedChasers = chasersRef.current.map((chaser) => {
+        let { x, y, direction: cDir, speed } = chaser;
+
+        // Check if chaser is near center of grid cell
+        const isAtCenter =
+          Math.abs((x - CELL_SIZE / 2) % CELL_SIZE) < 3 &&
+          Math.abs((y - CELL_SIZE / 2) % CELL_SIZE) < 3;
+
+        const validDirs = getValidDirections(x, y, obstacles);
+
+        if (validDirs.length > 0) {
+          if (isAtCenter || !validDirs.includes(cDir)) {
+            // Filter out opposite direction unless dead end
+            const opposite: Record<Direction, Direction> = {
+              up: "down",
+              down: "up",
+              left: "right",
+              right: "left",
+            };
+            const nonOpposite = validDirs.filter((d) => d !== opposite[cDir]);
+            const choices = nonOpposite.length > 0 ? nonOpposite : validDirs;
+
+            // 60% chance to chase player direction, 40% random choice
+            if (Math.random() < 0.6) {
+              const bestDir = choices.reduce((best, candidate) => {
+                let testX = x;
+                let testY = y;
+                if (candidate === "left") testX -= 10;
+                if (candidate === "right") testX += 10;
+                if (candidate === "up") testY -= 10;
+                if (candidate === "down") testY += 10;
+
+                const distToPlayer = Math.hypot(testX - currPlayerPos.x, testY - currPlayerPos.y);
+                const bestDist = Math.hypot(
+                  (best === "left" ? x - 10 : best === "right" ? x + 10 : x) - currPlayerPos.x,
+                  (best === "up" ? y - 10 : best === "down" ? y + 10 : y) - currPlayerPos.y,
+                );
+                return distToPlayer < bestDist ? candidate : best;
+              }, choices[0]);
+
+              cDir = bestDir;
+            } else {
+              cDir = choices[Math.floor(Math.random() * choices.length)];
+            }
+          }
+        }
+
+        let nx = x;
+        let ny = y;
+        if (cDir === "left") nx -= speed;
+        if (cDir === "right") nx += speed;
+        if (cDir === "up") ny -= speed;
+        if (cDir === "down") ny += speed;
+
+        if (!isCollidingWithWalls(nx, ny, obstacles)) {
+          x = nx;
+          y = ny;
+        }
+
+        return { ...chaser, x, y, direction: cDir };
+      });
+
+      chasersRef.current = updatedChasers;
+      setChasers(updatedChasers);
+
+      // Check Chaser-Player Collision
+      if (!invulnerableRef.current) {
+        for (const chaser of updatedChasers) {
+          const dist = Math.hypot(chaser.x - currPlayerPos.x, chaser.y - currPlayerPos.y);
+          if (dist < 18) {
+            // Player caught by bakery chaser!
+            invulnerableRef.current = true;
+            setInvulnerable(true);
+
+            setLives((l) => {
+              const newLives = l - 1;
+              if (newLives <= 0) {
+                setVictory(false);
+                setFinished(true);
+              }
+              return newLives;
+            });
+
+            // Reset player to start position
+            position.current = { ...currentMap.playerStart };
+            setPlayer({ ...currentMap.playerStart });
+
+            // Clear invulnerability after 1.8s
+            setTimeout(() => {
+              invulnerableRef.current = false;
+              setInvulnerable(false);
+            }, 1800);
+
+            break;
+          }
+        }
+      }
+
       // Check cookie eating collision
-      const currPos = position.current;
       const hitIndex = cookiesRef.current.findIndex(
-        (c) => Math.hypot(c.x - currPos.x, c.y - currPos.y) < HIT_DISTANCE,
+        (c) => Math.hypot(c.x - currPlayerPos.x, c.y - currPlayerPos.y) < HIT_DISTANCE,
       );
 
       if (hitIndex !== -1) {
@@ -176,6 +342,7 @@ export function CookieGame() {
         setTimeout(() => setCrumbs((cs) => cs.filter((c) => c.id !== id)), 650);
 
         if (cookiesRef.current.length === 0) {
+          setVictory(true);
           setFinished(true);
         }
       }
@@ -183,7 +350,7 @@ export function CookieGame() {
 
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [pressed, triggerEat, finished, currentMap.obstacles]);
+  }, [pressed, triggerEat, finished, currentMap.obstacles, currentMap.playerStart]);
 
   useEffect(
     () => () => {
@@ -209,6 +376,7 @@ export function CookieGame() {
         collected={totalCookies.current - cookies.length}
         total={totalCookies.current}
         mapName={currentMap.name}
+        lives={lives}
       />
 
       {/* Game Board Container */}
@@ -224,7 +392,7 @@ export function CookieGame() {
         {/* Outer dotted border */}
         <div className="pointer-events-none absolute inset-2 rounded-2xl border-2 border-dashed border-border/60" />
 
-        {/* Maze Walls (Paredes do Labirinto) */}
+        {/* Maze Walls (Paredes do Labirinto da Confeitaria) */}
         {currentMap.obstacles.map((obs, idx) => (
           <div
             key={idx}
@@ -243,6 +411,11 @@ export function CookieGame() {
           <GameCookie key={cookie.id} cookie={cookie} />
         ))}
 
+        {/* Chaser Enemies (Fantasminhas / Confeitos Encantados) */}
+        {chasers.map((chaser) => (
+          <GameChaser key={chaser.id} chaser={chaser} />
+        ))}
+
         {/* Floating "+10 nhac!" crumbs */}
         {crumbs.map((crumb) => (
           <span
@@ -258,19 +431,23 @@ export function CookieGame() {
         ))}
 
         {/* Mascot / Player */}
-        <GamePlayer
-          x={player.x}
-          y={player.y}
-          direction={direction}
-          eating={eating}
-          moving={moving}
-        />
+        <div className={invulnerable ? "animate-pulse opacity-60" : ""}>
+          <GamePlayer
+            x={player.x}
+            y={player.y}
+            direction={direction}
+            eating={eating}
+            moving={moving}
+          />
+        </div>
 
         {/* Game End Screen Dialog */}
         {finished && (
           <GameEndScreen
             score={score}
+            cookiesCollected={totalCookies.current - cookies.length}
             totalCookies={totalCookies.current}
+            victory={victory}
             onRestart={() => resetGame()}
             onOpenRanking={() => setRankingOpen(true)}
             onOpenAuth={() => setAuthOpen(true)}
@@ -314,7 +491,7 @@ export function CookieGame() {
         </div>
 
         <p className="text-center text-[11px] text-muted-foreground max-w-md">
-          💡 No computador use as <strong>setas</strong> ou <strong>W, A, S, D</strong>. No celular segure os botões direcionais para andar continuamente.
+          💡 Cuidado com os <strong>Confeitos Encantados 🧁</strong>! No computador use as <strong>setas</strong> ou <strong>W, A, S, D</strong>. No celular segure os botões direcionais para andar continuamente.
         </p>
       </div>
 

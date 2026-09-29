@@ -3,12 +3,14 @@ import type { User } from "@supabase/supabase-js";
 import type { DiscountCoupon } from "@/types/game";
 import { MENU_URL } from "@/data/gameConfig";
 import { calculatePlayerRank, createDiscountCoupon, saveGameMatch } from "@/services/gameService";
-import { Trophy, Copy, Check, Sparkles, RotateCcw, ShoppingBag, Award } from "lucide-react";
+import { Trophy, Copy, Check, Sparkles, RotateCcw, ShoppingBag, Award, HeartCrack } from "lucide-react";
 import { toast } from "sonner";
 
 interface Props {
   score: number;
+  cookiesCollected: number;
   totalCookies: number;
+  victory: boolean;
   onRestart: () => void;
   onOpenRanking: () => void;
   onOpenAuth: () => void;
@@ -17,7 +19,9 @@ interface Props {
 
 export function GameEndScreen({
   score,
+  cookiesCollected,
   totalCookies,
+  victory,
   onRestart,
   onOpenRanking,
   onOpenAuth,
@@ -35,29 +39,31 @@ export function GameEndScreen({
 
     async function processMatch() {
       try {
-        // Save match
-        await saveGameMatch({
-          user_id: user?.id || null,
-          player_name: playerName,
-          score,
-          cookies_collected: totalCookies,
-          total_cookies: totalCookies,
-          reference_month: new Date().toISOString().substring(0, 7),
-        });
+        if (score > 0) {
+          // Save match
+          await saveGameMatch({
+            user_id: user?.id || null,
+            player_name: playerName,
+            score,
+            cookies_collected: cookiesCollected,
+            total_cookies: totalCookies,
+            reference_month: new Date().toISOString().substring(0, 7),
+          });
 
-        // Calculate rank position
-        const pos = await calculatePlayerRank(score);
-        if (isMounted) setRankPos(pos);
+          // Calculate rank position
+          const pos = await calculatePlayerRank(score);
+          if (isMounted) setRankPos(pos);
 
-        // Generate coupon (Top 3 gets 5% OFF, or completion reward)
-        const isTop3 = pos <= 3;
-        const newCoupon = await createDiscountCoupon({
-          user_id: user?.id || undefined,
-          reason: isTop3 ? `Ranking Mensal - ${pos}º Lugar` : "Desconto Confeitaria Magisserie",
-          ranking_position: isTop3 ? pos : undefined,
-        });
+          // Generate coupon (Top 3 gets 5% OFF, or completion reward)
+          const isTop3 = pos <= 3;
+          const newCoupon = await createDiscountCoupon({
+            user_id: user?.id || undefined,
+            reason: isTop3 ? `Ranking Mensal - ${pos}º Lugar` : "Desconto Confeitaria Magisserie",
+            ranking_position: isTop3 ? pos : undefined,
+          });
 
-        if (isMounted) setCoupon(newCoupon);
+          if (isMounted) setCoupon(newCoupon);
+        }
       } catch (err) {
         console.error("Error processing end of match:", err);
       } finally {
@@ -70,7 +76,7 @@ export function GameEndScreen({
     return () => {
       isMounted = false;
     };
-  }, [score, totalCookies, user]);
+  }, [score, cookiesCollected, totalCookies, user]);
 
   const handleCopyCode = () => {
     if (!coupon) return;
@@ -84,19 +90,25 @@ export function GameEndScreen({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Jogo concluído"
-      className="absolute inset-0 z-20 flex items-center justify-center rounded-[inherit] bg-foreground/50 p-4 backdrop-blur-md overflow-y-auto"
+      aria-label={victory ? "Jogo concluído" : "Fim de jogo"}
+      className="absolute inset-0 z-20 flex items-center justify-center rounded-[inherit] bg-foreground/55 p-4 backdrop-blur-md overflow-y-auto"
     >
       <div className="animate-celebrate my-auto w-full max-w-md rounded-3xl border border-border bg-card p-6 text-center shadow-2xl">
-        <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-500">
-          <Trophy className="size-7" />
+        <div
+          className={`mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl ${
+            victory ? "bg-amber-500/10 text-amber-500" : "bg-rose-500/10 text-rose-500"
+          }`}
+        >
+          {victory ? <Trophy className="size-7" /> : <HeartCrack className="size-7" />}
         </div>
 
         <h2 className="text-2xl font-black text-foreground">
-          Você encontrou todos os cookies! 🍪
+          {victory ? "Você encontrou todos os cookies! 🍪" : "Fim de Jogo! 🧁"}
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Parabéns! Você concluiu o labirinto da Magisserie com perfeição.
+          {victory
+            ? "Parabéns! Você concluiu o labirinto da Magisserie com perfeição."
+            : "Os confeitos encantados te alcançaram! Tente novamente para alcançar o TOP 3."}
         </p>
 
         {/* Match Stats */}
@@ -121,7 +133,7 @@ export function GameEndScreen({
               <span>
                 {rankPos && rankPos <= 3
                   ? `🎉 Você ficou no TOP 3 (${rankPos}º Lugar)!`
-                  : "🎉 Recompensa de Conclusão!"}
+                  : "🎉 Recompensa Confeitaria!"}
               </span>
             </div>
 
@@ -185,7 +197,7 @@ export function GameEndScreen({
             className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-bold text-primary-foreground shadow-md transition-all hover:brightness-105 active:scale-95"
           >
             <RotateCcw className="size-4" />
-            <span>Jogar novamente</span>
+            <span>Tentar Novamente</span>
           </button>
 
           <div className="grid grid-cols-2 gap-2">

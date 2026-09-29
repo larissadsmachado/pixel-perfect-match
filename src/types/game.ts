@@ -65,3 +65,16 @@ export interface DiscountCoupon {
   created_at: string;
 }
 
+export interface ChaserEnemy {
+  id: number;
+  name: string;
+  type: "chantilly" | "donut" | "rolo";
+  x: number;
+  y: number;
+  direction: Direction;
+  speed: number;
+  color: string;
+}
+
+
+
