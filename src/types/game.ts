@@ -1,4 +1,4 @@
-export type CookieType = "tradicional" | "recheado";
+export type CookieType = "tradicional" | "recheado" | "super";
 
 export type Direction = "up" | "down" | "left" | "right";
 
@@ -16,8 +16,18 @@ export interface Obstacle {
   y: number;
   width: number;
   height: number;
-  /** optional visual style variation */
   type?: "wall" | "counter" | "decor";
+}
+
+export interface MapTheme {
+  boardBg: string;
+  boardPattern: string;
+  wallGradient: string;
+  wallBorder: string;
+  wallShadow: string;
+  badgeBg: string;
+  badgeText: string;
+  difficultyLabel: string;
 }
 
 export interface MazeMap {
@@ -29,6 +39,7 @@ export interface MazeMap {
   playerStart: { x: number; y: number };
   obstacles: Obstacle[];
   cookies: GameCookieItem[];
+  theme: MapTheme;
 }
 
 export interface GameMatch {
@@ -68,13 +79,13 @@ export interface DiscountCoupon {
 export interface ChaserEnemy {
   id: number;
   name: string;
-  type: "chantilly" | "donut" | "rolo";
+  type: "chantilly" | "donut" | "rolo" | "morango";
   x: number;
   y: number;
+  spawnX: number;
+  spawnY: number;
   direction: Direction;
   speed: number;
   color: string;
+  isScared?: boolean;
 }
-
-
-

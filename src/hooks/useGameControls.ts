@@ -10,7 +10,23 @@ const KEY_MAP: Record<string, Direction> = {
   s: "down",
   a: "left",
   d: "right",
+  W: "up",
+  S: "down",
+  A: "left",
+  D: "right",
 };
+
+/** Helper to check if event target is a form input or editable field */
+function isFormInput(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toUpperCase();
+  return (
+    tagName === "INPUT" ||
+    tagName === "TEXTAREA" ||
+    tagName === "SELECT" ||
+    target.isContentEditable
+  );
+}
 
 /**
  * Tracks which directions are currently held, from keyboard and touch.
@@ -47,12 +63,18 @@ export function useGameControls() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Do not capture keyboard controls if user is typing in a form input or modal
+      if (isFormInput(e.target)) return;
+
       const dir = KEY_MAP[e.key] ?? KEY_MAP[e.key.toLowerCase()];
       if (!dir) return;
       e.preventDefault();
       press(dir);
     };
+
     const onKeyUp = (e: KeyboardEvent) => {
+      if (isFormInput(e.target)) return;
+
       const dir = KEY_MAP[e.key] ?? KEY_MAP[e.key.toLowerCase()];
       if (!dir) return;
       release(dir);

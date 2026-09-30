@@ -1,12 +1,12 @@
-import type { ChaserEnemy, GameCookieItem, MazeMap, Obstacle } from "@/types/game";
+import type { ChaserEnemy, GameCookieItem, MazeMap, MapTheme, Obstacle } from "@/types/game";
 
 /** Board dimensions with exact 32px square grid cells (19 cols x 13 rows) */
 export const BOARD_WIDTH = 608;
 export const BOARD_HEIGHT = 416;
 
 /** Player and cookie dimensions in logical units */
-export const PLAYER_SIZE = 22;
-export const COOKIE_SIZE = 18;
+export const PLAYER_SIZE = 16;
+export const COOKIE_SIZE = 14;
 
 /** Movement speed per frame */
 export const PLAYER_SPEED = 3.5;
@@ -15,6 +15,7 @@ export const PLAYER_SPEED = 3.5;
 export const POINTS: Record<GameCookieItem["type"], number> = {
   tradicional: 10,
   recheado: 20,
+  super: 50,
 };
 
 /** Magisserie brand official sprites */
@@ -25,26 +26,42 @@ export const SPRITES = {
   recheado: "/assets/game/cookie-recheado.png",
 } as const;
 
-export const MENU_URL = "https://magisserie.com.br";
+export const MENU_URL = "https://magisserie.vercel.app/";
+
+/** Map Theme 1: Bancada da Magisserie (Soft Teal & Cream Confectionery) */
+const THEME_BANCADA: MapTheme = {
+  boardBg: "#fef7ef",
+  boardPattern: "#6ac5be",
+  wallGradient: "from-[#21687a] to-[#184e5b]",
+  wallBorder: "border-[#6ac5be]/40",
+  wallShadow: "shadow-md shadow-[#21687a]/20",
+  badgeBg: "bg-[#6ac5be]/20 text-[#21687a]",
+  badgeText: "Confeitaria Artesanal",
+  difficultyLabel: "Normal (3 Confeitos)",
+};
+
+/** Map Theme 2: Cozinha Encantada (Warm Terracotta & Crimson Gourmet Kitchen) */
+const THEME_COZINHA: MapTheme = {
+  boardBg: "#fff3eb",
+  boardPattern: "#fea579",
+  wallGradient: "from-[#c74a30] via-[#d65a3d] to-[#aa3620]",
+  wallBorder: "border-[#fea579]/60",
+  wallShadow: "shadow-lg shadow-[#c74a30]/30",
+  badgeBg: "bg-rose-500/20 text-rose-700 font-bold",
+  badgeText: "Cozinha Encantada 🌶️",
+  difficultyLabel: "DIFÍCIL (4 Confeitos Rápido)",
+};
 
 /**
  * Grid parser helper for designing custom original Magisserie mazes.
- * Legend:
- * '#' = Wall obstacle
- * '.' = Cookie tradicional (10 pts)
- * 'R' = Cookie recheado (20 pts)
- * 'P' = Player start location
- * 'C' = Chantilly Chaser spawn
- * 'D' = Donut Chaser spawn
- * 'M' = Rolo de Massa Chaser spawn
- * ' ' = Open corridor
  */
 function parseGridMap(
   id: string,
   name: string,
   description: string,
   grid: string[],
-): MazeMap & { initialChasers: ChaserEnemy[] } {
+  theme: MapTheme,
+): MazeMap & { initialChasers: ChaserEnemy[]; rawGrid: string[] } {
   const rows = grid.length;
   const cols = grid[0].length;
   const cellW = BOARD_WIDTH / cols;
@@ -90,6 +107,14 @@ function parseGridMap(
           y: centerY,
           points: POINTS.recheado,
         });
+      } else if (char === "W") {
+        cookies.push({
+          id: cookieId++,
+          type: "super",
+          x: centerX,
+          y: centerY,
+          points: POINTS.super,
+        });
       } else if (char === "P") {
         playerStart = { x: centerX, y: centerY };
       } else if (char === "C") {
@@ -99,8 +124,10 @@ function parseGridMap(
           type: "chantilly",
           x: centerX,
           y: centerY,
+          spawnX: centerX,
+          spawnY: centerY,
           direction: "left",
-          speed: 2.2,
+          speed: 1.6,
           color: "#6ac5be",
         });
       } else if (char === "D") {
@@ -110,8 +137,10 @@ function parseGridMap(
           type: "donut",
           x: centerX,
           y: centerY,
+          spawnX: centerX,
+          spawnY: centerY,
           direction: "right",
-          speed: 2.4,
+          speed: 1.7,
           color: "#fea579",
         });
       } else if (char === "M") {
@@ -121,9 +150,24 @@ function parseGridMap(
           type: "rolo",
           x: centerX,
           y: centerY,
+          spawnX: centerX,
+          spawnY: centerY,
           direction: "up",
-          speed: 2.0,
+          speed: 1.5,
           color: "#21687a",
+        });
+      } else if (char === "S") {
+        initialChasers.push({
+          id: chaserId++,
+          name: "Moranguinho Mágico",
+          type: "morango",
+          x: centerX,
+          y: centerY,
+          spawnX: centerX,
+          spawnY: centerY,
+          direction: "down",
+          speed: 1.9,
+          color: "#e56b6f",
         });
       }
     }
@@ -139,40 +183,42 @@ function parseGridMap(
     obstacles,
     cookies,
     initialChasers,
+    theme,
+    rawGrid: grid,
   };
 }
 
-/** Original Magisserie Map 1: "Bancada Principal da Magisserie" (19x13 grid) */
+/** Map 1: Bancada Principal da Magisserie (19x13 grid - 100% reachable) */
 const GRID_MAP_1 = [
   "###################",
-  "#R. .#...C...#...R#",
-  "#.#.#.#.###.#.#.#.#",
-  "#...#... . ...#...#",
-  "###.###.###.###.###",
-  "#...#...#P#...#...#",
-  "#.#####.#.#.#####.#",
-  "#...R... . ...R...#",
-  "###.###.###.###.###",
-  "#...#...#...#...#.#",
-  "#.#.#.#.###.#.#.#.#",
-  "#R.D.#...M...#...R#",
+  "#W......C........W#",
+  "#.###.#######.###.#",
+  "#.#...............#",
+  "#.#.###.#####.###.#",
+  "#...R.....P.....R.#",
+  "#.###.###.#.###.###",
+  "#...R...........R.#",
+  "#.#.###.#####.###.#",
+  "#.#......D.M....#.#",
+  "#.###.#######.###.#",
+  "#W...............W#",
   "###################",
 ];
 
-/** Original Magisserie Map 2: "Cozinha Encantada" (19x13 grid) */
+/** Map 2: Cozinha Encantada (19x13 grid - High-Difficulty Gourmet Kitchen - 100% reachable) */
 const GRID_MAP_2 = [
   "###################",
-  "#R...#...C...#...R#",
-  "#.#####.###.#####.#",
-  "#...#... . ...#...#",
-  "###.#.#######.#.###",
-  "#...R..D#P#M..R...#",
-  "#.#####.#.#.#####.#",
-  "#...#... . ...#...#",
-  "###.#.#######.#.###",
-  "#...#...R...#...#.#",
-  "#.#####.###.#####.#",
-  "#R...#...R...#...R#",
+  "#W.C........S..R.W#",
+  "#.###.#######.###.#",
+  "#.#......R......#.#",
+  "#.#.###.#####.###.#",
+  "#R..D....P.....M.R#",
+  "#.###.###.#.###.###",
+  "#...R.......R.....#",
+  "#.#.###.#####.###.#",
+  "#.#......R......#.#",
+  "#.###.#######.###.#",
+  "#W...............W#",
   "###################",
 ];
 
@@ -180,14 +226,16 @@ export const MAZE_MAPS = [
   parseGridMap(
     "bancada-magisserie",
     "Bancada da Magisserie",
-    "Labirinto artesanal clássico com confeitos encantados perseguidores!",
+    "Fase 1: Labirinto clássico artesanal com confeitos encantados.",
     GRID_MAP_1,
+    THEME_BANCADA,
   ),
   parseGridMap(
     "cozinha-encantada",
     "Cozinha Encantada",
-    "Fase 2: Desafio mais rápido com utensílios mágicos de confeitaria!",
+    "Fase 2 (DIFÍCIL): Novo visual de cozinha gourmet, 4 confeitos rápidos e Super Cookies!",
     GRID_MAP_2,
+    THEME_COZINHA,
   ),
 ];
 
